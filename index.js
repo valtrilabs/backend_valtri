@@ -109,12 +109,12 @@ app.get('/api/orders/:id', async (req, res) => {
   res.json(data);
 });
 
-// Mark order as paid (admin only)
-app.patch('/api/orders/:id/pay', async (req, res) => {
+// Mark order as delivered (admin only)
+app.patch('/api/orders/:id/deliver', async (req, res) => {
   const { id } = req.params;
   const { data, error } = await supabase
     .from('orders')
-    .update({ status: 'paid' })
+    .update({ status: 'delivered' })
     .eq('id', id)
     .select()
     .single();
