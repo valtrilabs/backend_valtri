@@ -19,9 +19,13 @@ const supabase = createClient(
 app.get('/api/menu', async (req, res) => {
   const { data, error } = await supabase
     .from('menu_items')
-    .select('*')
-    .eq('is_available', true);
-  if (error) return res.status(500).json({ error: error.message });
+    .select('id, name, category, price, description')
+    .eq('is_available', true)
+    .order('category, name');
+  if (error) {
+    console.error('Menu fetch error:', error);
+    return res.status(500).json({ error: error.message });
+  }
   res.json(data);
 });
 
@@ -54,7 +58,10 @@ app.post('/api/orders', async (req, res) => {
     .insert([{ table_id, items, status: 'pending' }])
     .select()
     .single();
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) {
+    console.error('Order insert error:', error);
+    return res.status(500).json({ error: error.message });
+  }
   res.json(data);
 });
 
@@ -92,7 +99,10 @@ app.patch('/api/orders/:id', async (req, res) => {
     .eq('id', id)
     .select()
     .single();
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) {
+    console.error('Order update error:', error);
+    return res.status(500).json({ error: error.message });
+  }
   res.json(data);
 });
 
@@ -104,7 +114,10 @@ app.get('/api/orders/:id', async (req, res) => {
     .select('*, tables(number)')
     .eq('id', id)
     .single();
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) {
+    console.error('Order fetch error:', error);
+    return res.status(500).json({ error: error.message });
+  }
   if (!data) return res.status(404).json({ error: 'Order not found' });
   res.json(data);
 });
@@ -112,13 +125,26 @@ app.get('/api/orders/:id', async (req, res) => {
 // Mark order as paid (admin only)
 app.patch('/api/orders/:id/pay', async (req, res) => {
   const { id } = req.params;
+  const { data: order } = await supabase
+    .from('orders')
+    .select('id')
+    .eq('id', id)
+    .single();
+  if (!order) {
+    console.error('Order not found:', id);
+    return res.status(404).json({ error: 'Order not found' });
+  }
+
   const { data, error } = await supabase
     .from('orders')
     .update({ status: 'paid' })
     .eq('id', id)
     .select()
     .single();
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) {
+    console.error('Order pay error:', error);
+    return res.status(500).json({ error: error.message });
+  }
   res.json(data);
 });
 
@@ -128,7 +154,10 @@ app.get('/api/admin/orders', async (req, res) => {
     .from('orders')
     .select('*, tables(number)')
     .eq('status', 'pending');
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) {
+    console.error('Pending orders fetch error:', error);
+    return res.status(500).json({ error: error.message });
+  }
   res.json(data);
 });
 
@@ -138,7 +167,10 @@ app.get('/api/admin/orders/export', async (req, res) => {
     .from('orders')
     .select('id, table_id, items, status, created_at, tables(number)')
     .order('created_at', { ascending: false });
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) {
+    console.error('Orders export error:', error);
+    return res.status(500).json({ error: error.message });
+  }
 
   const csv = [
     'Order ID,Table Number,Items,Status,Created At',
