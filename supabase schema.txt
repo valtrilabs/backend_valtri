@@ -1,0 +1,36 @@
+\-- Creating tables table
+CREATE TABLE tables (
+id SERIAL PRIMARY KEY,
+number INTEGER UNIQUE NOT NULL
+);
+
+\-- Creating menu\_items table
+CREATE TABLE menu\_items (
+id SERIAL PRIMARY KEY,
+name TEXT NOT NULL,
+price NUMERIC(10, 2) NOT NULL,
+is\_available BOOLEAN DEFAULT TRUE
+);
+
+\-- Creating orders table
+CREATE TABLE orders (
+id UUID PRIMARY KEY DEFAULT gen\_random\_uuid(),
+table\_id INTEGER REFERENCES tables(id),
+items JSONB,
+status TEXT CHECK (status IN ('pending', 'paid')) DEFAULT 'pending',
+created\_at TIMESTAMP DEFAULT NOW()
+);
+
+\-- Inserting table numbers (1 to 30)
+INSERT INTO tables (number) VALUES
+(1), (2), (3), (4), (5), (6), (7), (8), (9), (10),
+(11), (12), (13), (14), (15), (16), (17), (18), (19), (20),
+(21), (22), (23), (24), (25), (26), (27), (28), (29), (30);
+
+\-- Inserting sample menu items
+INSERT INTO menu\_items (name, price, is\_available) VALUES
+('Espresso', 3.50, TRUE),
+('Cappuccino', 4.00, TRUE),
+('Croissant', 2.50, TRUE),
+('Club Sandwich', 8.00, TRUE);
+
