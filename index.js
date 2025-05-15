@@ -12,7 +12,8 @@ app.use(express.json());
 // Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
+  process.env.SUPABASE_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
 // Get menu items
@@ -32,36 +33,44 @@ app.get('/api/menu', async (req, res) => {
 // Create order
 app.post('/api/orders', async (req, res) => {
   const { table_id, items } = req.body;
+  console.log('POST /api/orders - Payload:', { table_id, items });
   if (!table_id || !items || !Array.isArray(items)) {
+    console.log('POST /api/orders - Invalid input');
     return res.status(400).json({ error: 'Invalid input' });
   }
 
   // Validate table_id
-  const { data: table } = await supabase
+  const { data: table, error: tableError } = await supabase
     .from('tables')
     .select('id')
     .eq('id', table_id)
     .single();
-  if (!table) return res.status(400).json({ error: 'Invalid table' });
+  if (tableError || !table) {
+    console.log('POST /api/orders - Invalid table:', tableError?.message);
+    return res.status(400).json({ error: 'Invalid table' });
+  }
 
   // Validate items
-  const { data: menuItems } = await supabase
+  const { data: menuItems, error: itemsError } = await supabase
     .from('menu_items')
     .select('id')
     .in('id', items.map(item => item.item_id));
-  if (menuItems.length !== items.length) {
+  if (itemsError || menuItems.length !== items.length) {
+    console.log('POST /api/orders - Invalid items:', itemsError?.message);
     return res.status(400).json({ error: 'Invalid items' });
   }
 
+  // Attempt to insert order
   const { data, error } = await supabase
     .from('orders')
     .insert([{ table_id, items, status: 'pending' }])
     .select()
     .single();
   if (error) {
-    console.error('Order insert error:', error);
+    console.error('POST /api/orders - Order insert error:', error);
     return res.status(500).json({ error: error.message });
   }
+  console.log('POST /api/orders - Order created:', data);
   res.json(data);
 });
 
@@ -69,27 +78,34 @@ app.post('/api/orders', async (req, res) => {
 app.patch('/api/orders/:id', async (req, res) => {
   const { id } = req.params;
   const { items } = req.body;
+  console.log('PATCH /api/orders/:id - Payload:', { id, items });
   if (!items || !Array.isArray(items)) {
+    console.log('PATCH /api/orders/:id - Invalid input');
     return res.status(400).json({ error: 'Invalid input' });
   }
 
   // Check if order exists and is pending
-  const { data: order } = await supabase
+  const { data: order, error: orderError } = await supabase
     .from('orders')
     .select('status')
     .eq('id', id)
     .single();
-  if (!order) return res.status(404).json({ error: 'Order not found' });
+  if (orderError || !order) {
+    console.log('PATCH /api/orders/:id - Order not found:', orderError?.message);
+    return res.status(404).json({ error: 'Order not found' });
+  }
   if (order.status !== 'pending') {
+    console.log('PATCH /api/orders/:id - Can only update pending orders');
     return res.status(400).json({ error: 'Can only update pending orders' });
   }
 
   // Validate items
-  const { data: menuItems } = await supabase
+  const { data: menuItems, error: itemsError } = await supabase
     .from('menu_items')
     .select('id')
     .in('id', items.map(item => item.item_id));
-  if (menuItems.length !== items.length) {
+  if (itemsError || menuItems.length !== items.length) {
+    console.log('PATCH /api/orders/:id - Invalid items:', itemsError?.message);
     return res.status(400).json({ error: 'Invalid items' });
   }
 
@@ -100,9 +116,10 @@ app.patch('/api/orders/:id', async (req, res) => {
     .select()
     .single();
   if (error) {
-    console.error('Order update error:', error);
+    console.error('PATCH /api/orders/:id - Order update error:', error);
     return res.status(500).json({ error: error.message });
   }
+  console.log('PATCH /api/orders/:id - Order updated:', data);
   res.json(data);
 });
 
@@ -115,23 +132,26 @@ app.get('/api/orders/:id', async (req, res) => {
     .eq('id', id)
     .single();
   if (error) {
-    console.error('Order fetch error:', error);
+    console.error('GET /api/orders/:id - Order fetch error:', error);
     return res.status(500).json({ error: error.message });
   }
-  if (!data) return res.status(404).json({ error: 'Order not found' });
+  if (!data) {
+    console.log('GET /api/orders/:id - Order not found');
+    return res.status(404).json({ error: 'Order not found' });
+  }
   res.json(data);
 });
 
 // Mark order as paid (admin only)
 app.patch('/api/orders/:id/pay', async (req, res) => {
   const { id } = req.params;
-  const { data: order } = await supabase
+  const { data: order, error: orderError } = await supabase
     .from('orders')
     .select('id')
     .eq('id', id)
     .single();
-  if (!order) {
-    console.error('Order not found:', id);
+  if (orderError || !order) {
+    console.error('PATCH /api/orders/:id/pay - Order not found:', orderError?.message);
     return res.status(404).json({ error: 'Order not found' });
   }
 
@@ -142,9 +162,10 @@ app.patch('/api/orders/:id/pay', async (req, res) => {
     .select()
     .single();
   if (error) {
-    console.error('Order pay error:', error);
+    console.error('PATCH /api/orders/:id/pay - Order pay error:', error);
     return res.status(500).json({ error: error.message });
   }
+  console.log('PATCH /api/orders/:id/pay - Order marked as paid:', data);
   res.json(data);
 });
 
@@ -155,7 +176,7 @@ app.get('/api/admin/orders', async (req, res) => {
     .select('*, tables(number)')
     .eq('status', 'pending');
   if (error) {
-    console.error('Pending orders fetch error:', error);
+    console.error('GET /api/admin/orders - Pending orders fetch error:', error);
     return res.status(500).json({ error: error.message });
   }
   res.json(data);
@@ -168,7 +189,7 @@ app.get('/api/admin/orders/export', async (req, res) => {
     .select('id, table_id, items, status, created_at, tables(number)')
     .order('created_at', { ascending: false });
   if (error) {
-    console.error('Orders export error:', error);
+    console.error('GET /api/admin/orders/export - Orders export error:', error);
     return res.status(500).json({ error: error.message });
   }
 
