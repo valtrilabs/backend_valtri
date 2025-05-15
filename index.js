@@ -11,8 +11,8 @@ app.use(express.json());
 
 // Supabase client
 const supabase = createClient(
-  process.env.SUPABASE_URL, // Replace with your Supabase URL
-  process.env.SUPABASE_KEY // Replace with your Supabase Anon Key
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
 );
 
 // Get menu items
@@ -52,6 +52,44 @@ app.post('/api/orders', async (req, res) => {
   const { data, error } = await supabase
     .from('orders')
     .insert([{ table_id, items, status: 'pending' }])
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// Update order items
+app.patch('/api/orders/:id', async (req, res) => {
+  const { id } = req.params;
+  const { items } = req.body;
+  if (!items || !Array.isArray(items)) {
+    return res.status(400).json({ error: 'Invalid input' });
+  }
+
+  // Check if order exists and is pending
+  const { data: order } = await supabase
+    .from('orders')
+    .select('status')
+    .eq('id', id)
+    .single();
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  if (order.status !== 'pending') {
+    return res.status(400).json({ error: 'Can only update pending orders' });
+  }
+
+  // Validate items
+  const { data: menuItems } = await supabase
+    .from('menu_items')
+    .select('id')
+    .in('id', items.map(item => item.item_id));
+  if (menuItems.length !== items.length) {
+    return res.status(400).json({ error: 'Invalid items' });
+  }
+
+  const { data, error } = await supabase
+    .from('orders')
+    .update({ items })
+    .eq('id', id)
     .select()
     .single();
   if (error) return res.status(500).json({ error: error.message });
