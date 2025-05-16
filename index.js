@@ -64,7 +64,7 @@ app.post('/api/orders', async (req, res) => {
   const { data, error } = await supabase
     .from('orders')
     .insert([{ table_id, items, status: 'pending' }])
-    .select()
+    .select('id, order_number, created_at, table_id, items, status')
     .single();
   if (error) {
     console.error('POST /api/orders - Order insert error:', error);
@@ -113,7 +113,7 @@ app.patch('/api/orders/:id', async (req, res) => {
     .from('orders')
     .update({ items })
     .eq('id', id)
-    .select()
+    .select('id, order_number, created_at, table_id, items, status')
     .single();
   if (error) {
     console.error('PATCH /api/orders/:id - Order update error:', error);
@@ -128,7 +128,7 @@ app.get('/api/orders/:id', async (req, res) => {
   const { id } = req.params;
   const { data, error } = await supabase
     .from('orders')
-    .select('*, tables(number)')
+    .select('id, order_number, created_at, table_id, items, status, tables(number)')
     .eq('id', id)
     .single();
   if (error) {
@@ -159,7 +159,7 @@ app.patch('/api/orders/:id/pay', async (req, res) => {
     .from('orders')
     .update({ status: 'paid' })
     .eq('id', id)
-    .select()
+    .select('id, order_number, created_at, table_id, items, status')
     .single();
   if (error) {
     console.error('PATCH /api/orders/:id/pay - Order pay error:', error);
@@ -173,7 +173,7 @@ app.patch('/api/orders/:id/pay', async (req, res) => {
 app.get('/api/admin/orders', async (req, res) => {
   const { data, error } = await supabase
     .from('orders')
-    .select('*, tables(number)')
+    .select('id, order_number, created_at, table_id, items, status, tables(number)')
     .eq('status', 'pending');
   if (error) {
     console.error('GET /api/admin/orders - Pending orders fetch error:', error);
@@ -186,7 +186,7 @@ app.get('/api/admin/orders', async (req, res) => {
 app.get('/api/admin/orders/export', async (req, res) => {
   const { data, error } = await supabase
     .from('orders')
-    .select('id, table_id, items, status, created_at, tables(number)')
+    .select('id, order_number, created_at, table_id, items, status, tables(number)')
     .order('created_at', { ascending: false });
   if (error) {
     console.error('GET /api/admin/orders/export - Orders export error:', error);
@@ -194,9 +194,9 @@ app.get('/api/admin/orders/export', async (req, res) => {
   }
 
   const csv = [
-    'Order ID,Table Number,Items,Status,Created At',
+    'Order Number,Table Number,Items,Status,Created At',
     ...data.map(order =>
-      `${order.id},${order.tables.number},${JSON.stringify(order.items)},${order.status},${order.created_at}`
+      `${order.order_number || order.id},${order.tables.number},${JSON.stringify(order.items)},${order.status},${order.created_at}`
     ),
   ].join('\n');
 
