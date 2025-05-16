@@ -216,7 +216,9 @@ app.get('/api/admin/orders/history', async (req, res) => {
 
   // Search by order_number or table number
   if (search) {
-    query = query.or(`order_number.ilike.%${search}%,tables.number.ilike.%${search}%`);
+    // Sanitize search input by escaping special characters
+    const sanitizedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    query = query.or(`order_number.ilike.%${sanitizedSearch}%,tables.number.ilike.%${sanitizedSearch}%`);
   }
 
   const { data, error } = await query;
