@@ -60,7 +60,6 @@ app.post('/api/orders', async (req, res) => {
     return res.status(400).json({ error: 'Invalid items' });
   }
 
-  // Attempt to insert order
   const { data, error } = await supabase
     .from('orders')
     .insert([{ table_id, items, status: 'pending' }])
@@ -142,7 +141,7 @@ app.get('/api/orders/:id', async (req, res) => {
   res.json(data);
 });
 
-// Mark order as paid (admin only)
+// Mark order as paid
 app.patch('/api/orders/:id/pay', async (req, res) => {
   const { id } = req.params;
   const { data: order, error: orderError } = await supabase
@@ -169,7 +168,7 @@ app.patch('/api/orders/:id/pay', async (req, res) => {
   res.json(data);
 });
 
-// Get all pending orders (admin)
+// Get pending orders (admin)
 app.get('/api/admin/orders', async (req, res) => {
   const { data, error } = await supabase
     .from('orders')
@@ -177,6 +176,42 @@ app.get('/api/admin/orders', async (req, res) => {
     .eq('status', 'pending');
   if (error) {
     console.error('GET /api/admin/orders - Pending orders fetch error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+  res.json(data);
+});
+
+// Get order history (admin)
+app.get('/api/admin/orders/history', async (req, res) => {
+  const { startDate, endDate, statuses, search } = req.query;
+  console.log('GET /api/admin/orders/history - Query:', { startDate, endDate, statuses, search });
+
+  let query = supabase
+    .from('orders')
+    .select('id, order_number, created_at, table_id, items, status, tables(number)')
+    .order('created_at', { ascending: false });
+
+  // Date range filter
+  if (startDate && endDate) {
+    query = query
+      .gte('created_at', startDate)
+      .lte('created_at', endDate);
+  }
+
+  // Status filter
+  if (statuses) {
+    const statusArray = statuses.split(',');
+    query = query.in('status', statusArray);
+  }
+
+  // Search by order_number or table number
+  if (search) {
+    query = query.or(`order_number.ilike.%${search}%,tables.number.ilike.%${search}%`);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error('GET /api/admin/orders/history - History fetch error:', error);
     return res.status(500).json({ error: error.message });
   }
   res.json(data);
