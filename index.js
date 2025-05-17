@@ -42,8 +42,8 @@ app.get('/api/menu', async (req, res) => {
 
 // Create order
 app.post('/api/orders', async (req, res) => {
-  const { table_id, items } = req.body;
-  console.log('POST /api/orders - Payload:', { table_id, items });
+  const { table_id, items, notes } = req.body;
+  console.log('POST /api/orders - Payload:', { table_id, items, notes });
   if (!table_id || !items || !Array.isArray(items)) {
     console.log('POST /api/orders - Invalid input');
     return res.status(400).json({ error: 'Invalid input' });
@@ -72,8 +72,8 @@ app.post('/api/orders', async (req, res) => {
 
   const { data, error } = await supabase
     .from('orders')
-    .insert([{ table_id, items, status: 'pending' }])
-    .select('id, order_number, created_at, table_id, items, status')
+    .insert([{ table_id, items, status: 'pending', notes: notes || null }])
+    .select('id, order_number, created_at, table_id, items, status, notes')
     .single();
   if (error) {
     console.error('POST /api/orders - Order insert error:', error);
@@ -86,8 +86,8 @@ app.post('/api/orders', async (req, res) => {
 // Update order items
 app.patch('/api/orders/:id', async (req, res) => {
   const { id } = req.params;
-  const { items } = req.body;
-  console.log('PATCH /api/orders/:id - Payload:', { id, items });
+  const { items, notes } = req.body;
+  console.log('PATCH /api/orders/:id - Payload:', { id, items, notes });
   if (!items || !Array.isArray(items)) {
     console.log('PATCH /api/orders/:id - Invalid input');
     return res.status(400).json({ error: 'Invalid input' });
@@ -120,9 +120,9 @@ app.patch('/api/orders/:id', async (req, res) => {
 
   const { data, error } = await supabase
     .from('orders')
-    .update({ items })
+    .update({ items, notes: notes || null })
     .eq('id', id)
-    .select('id, order_number, created_at, table_id, items, status')
+    .select('id, order_number, created_at, table_id, items, status, notes')
     .single();
   if (error) {
     console.error('PATCH /api/orders/:id - Order update error:', error);
@@ -137,7 +137,7 @@ app.get('/api/orders/:id', async (req, res) => {
   const { id } = req.params;
   const { data, error } = await supabase
     .from('orders')
-    .select('id, order_number, created_at, table_id, items, status, tables(number)')
+    .select('id, order_number, created_at, table_id, items, status, notes, tables(number)')
     .eq('id', id)
     .single();
   if (error) {
@@ -168,7 +168,7 @@ app.patch('/api/orders/:id/pay', async (req, res) => {
     .from('orders')
     .update({ status: 'paid' })
     .eq('id', id)
-    .select('id, order_number, created_at, table_id, items, status')
+    .select('id, order_number, created_at, table_id, items, status, notes')
     .single();
   if (error) {
     console.error('PATCH /api/orders/:id/pay - Order pay error:', error);
@@ -182,7 +182,7 @@ app.patch('/api/orders/:id/pay', async (req, res) => {
 app.get('/api/admin/orders', async (req, res) => {
   const { data, error } = await supabase
     .from('orders')
-    .select('id, order_number, created_at, table_id, items, status, tables(number)')
+    .select('id, order_number, created_at, table_id, items, status, notes, tables(number)')
     .eq('status', 'pending');
   if (error) {
     console.error('GET /api/admin/orders - Pending orders fetch error:', error);
@@ -198,7 +198,7 @@ app.get('/api/admin/orders/history', async (req, res) => {
 
   let query = supabase
     .from('orders')
-    .select('id, order_number, created_at, table_id, items, status, tables(number)')
+    .select('id, order_number, created_at, table_id, items, status, notes, tables(number)')
     .order('created_at', { ascending: false });
 
   // Date range filter
@@ -229,11 +229,33 @@ app.get('/api/admin/orders/history', async (req, res) => {
   res.json(data);
 });
 
+// Get pending orders (waiter)
+app.get('/api/orders', async (req, res) => {
+  const { status } = req.query;
+  console.log('GET /api/orders - Query:', { status });
+  if (status !== 'pending') {
+    console.log('GET /api/orders - Invalid status');
+    return res.status(400).json({ error: 'Only pending status is supported' });
+  }
+
+  const { data, error } = await supabase
+    .from('orders')
+    .select('id, order_number, created_at, table_id, items, status, notes, tables(number)')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false });
+  if (error) {
+    console.error('GET /api/orders - Pending orders fetch error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+  console.log('GET /api/orders - Pending orders fetched:', data);
+  res.json(data);
+});
+
 // Export orders as CSV (admin)
 app.get('/api/admin/orders/export', async (req, res) => {
   const { data, error } = await supabase
     .from('orders')
-    .select('id, order_number, created_at, table_id, items, status, tables(number)')
+    .select('id, order_number, created_at, table_id, items, status, notes, tables(number)')
     .order('created_at', { ascending: false });
   if (error) {
     console.error('GET /api/admin/orders/export - Orders export error:', error);
@@ -241,9 +263,9 @@ app.get('/api/admin/orders/export', async (req, res) => {
   }
 
   const csv = [
-    'Order Number,Table Number,Items,Status,Created At',
+    'Order Number,Table Number,Items,Status,Notes,Created At',
     ...data.map(order =>
-      `${order.order_number || order.id},${order.tables.number},${JSON.stringify(order.items)},${order.status},${order.created_at}`
+      `${order.order_number || order.id},${order.tables.number},${JSON.stringify(order.items)},${order.status},${order.notes || ''},${order.created_at}`
     ),
   ].join('\n');
 
