@@ -193,8 +193,8 @@ app.get('/api/admin/orders', async (req, res) => {
 
 // Get order history (admin)
 app.get('/api/admin/orders/history', async (req, res) => {
-  const { startDate, endDate, statuses, search } = req.query;
-  console.log('GET /api/admin/orders/history - Query:', { startDate, endDate, statuses, search });
+  const { startDate, endDate, statuses, search, aggregate } = req.query;
+  console.log('GET /api/admin/orders/history - Query:', { startDate, endDate, statuses, search, aggregate });
 
   let query = supabase
     .from('orders')
@@ -216,7 +216,6 @@ app.get('/api/admin/orders/history', async (req, res) => {
 
   // Search by order_number or table number
   if (search) {
-    // Sanitize search input by escaping special characters
     const sanitizedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     query = query.or(`order_number.ilike.%${sanitizedSearch}%,tables.number.ilike.%${sanitizedSearch}%`);
   }
@@ -226,6 +225,23 @@ app.get('/api/admin/orders/history', async (req, res) => {
     console.error('GET /api/admin/orders/history - History fetch error:', error);
     return res.status(500).json({ error: error.message });
   }
+
+  // Handle aggregations
+  if (aggregate) {
+    if (aggregate === 'revenue') {
+      const totalRevenue = data.reduce((sum, order) =>
+        sum + order.items.reduce((s, item) => s + (item.price * (item.quantity || 1)), 0), 0
+      );
+      return res.json({ totalRevenue });
+    }
+    if (aggregate === 'items_sold') {
+      const totalItemsSold = data.reduce((sum, order) =>
+        sum + order.items.reduce((s, item) => s + (item.quantity || 1), 0), 0
+      );
+      return res.json({ totalItemsSold });
+    }
+  }
+
   res.json(data);
 });
 
