@@ -30,7 +30,7 @@ const supabase = createClient(
 app.get('/api/menu', async (req, res) => {
   const { data, error } = await supabase
     .from('menu_items')
-    .select('id, name, category, price, description')
+    .select('id, name, category, price, description, image_url') // Added image_url
     .eq('is_available', true)
     .order('category, name');
   if (error) {
