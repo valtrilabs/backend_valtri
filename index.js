@@ -30,7 +30,7 @@ const supabase = createClient(
 app.get('/api/menu', async (req, res) => {
   const { data, error } = await supabase
     .from('menu_items')
-    .select('id, name, category, price, description, image_url')
+    .select('id, name, category, price, description, image_url') // Added image_url
     .eq('is_available', true)
     .order('category, name');
   if (error) {
@@ -296,127 +296,6 @@ app.get('/api/admin/orders/export', async (req, res) => {
   res.header('Content-Type', 'text/csv');
   res.attachment('orders.csv');
   res.send(csv);
-});
-
-// New analytics endpoints
-app.get('/api/admin/analytics/total-orders', async (req, res) => {
-  const { startDate, endDate } = req.query;
-  let query = supabase.from('orders').select('id', { count: 'exact' });
-  if (startDate && endDate) {
-    query = query.gte('created_at', startDate).lte('created_at', endDate);
-  }
-  const { count, error } = await query;
-  if (error) {
-    console.error('Total orders fetch error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-  res.json({ totalOrders: count || 0 });
-});
-
-app.get('/api/admin/analytics/total-revenue', async (req, res) => {
-  const { startDate, endDate } = req.query;
-  let query = supabase.from('orders').select('items');
-  if (startDate && endDate) {
-    query = query.gte('created_at', startDate).lte('created_at', endDate);
-  }
-  const { data, error } = await query;
-  if (error) {
-    console.error('Total revenue fetch error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-  const totalRevenue = data.reduce((sum, order) => {
-    return sum + order.items.reduce((s, item) => s + (item.price * (item.quantity || 1)), 0);
-  }, 0);
-  res.json({ totalRevenue });
-});
-
-app.get('/api/admin/analytics/most-sold-item', async (req, res) => {
-  const { startDate, endDate } = req.query;
-  let query = supabase.from('orders').select('items');
-  if (startDate && endDate) {
-    query = query.gte('created_at', startDate).lte('created_at', endDate);
-  }
-  const { data, error } = await query;
-  if (error) {
-    console.error('Most sold item fetch error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-  const itemCounts = {};
-  data.forEach(order => {
-    order.items.forEach(item => {
-      const itemName = item.name;
-      const quantity = item.quantity || 1;
-      itemCounts[itemName] = (itemCounts[itemName] || 0) + quantity;
-    });
-  });
-  let mostSold = { name: '', totalSold: 0 };
-  for (const [name, count] of Object.entries(itemCounts)) {
-    if (count > mostSold.totalSold) {
-      mostSold = { name, totalSold: count };
-    }
-  }
-  res.json(mostSold);
-});
-
-app.get('/api/admin/analytics/peak-hours', async (req, res) => {
-  const { startDate, endDate } = req.query;
-  let query = supabase.from('orders').select('created_at');
-  if (startDate && endDate) {
-    query = query.gte('created_at', startDate).lte('created_at', endDate);
-  }
-  const { data, error } = await query;
-  if (error) {
-    console.error('Peak hours fetch error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-  const ordersByHour = Array(24).fill(0);
-  data.forEach(order => {
-    const utcDate = new Date(order.created_at);
-    const istDate = new Date(utcDate.getTime() + (5.5 * 60 * 60 * 1000)); // Add 5.5 hours for IST
-    const hour = istDate.getUTCHours(); // Get hour in IST
-    ordersByHour[hour]++;
-  });
-  const peakHourIndex = ordersByHour.indexOf(Math.max(...ordersByHour));
-  const peakHour = peakHourIndex >= 0 ? `${peakHourIndex}:00` : 'N/A';
-  res.json({ peakHour });
-});
-
-app.get('/api/admin/analytics/total-items-sold', async (req, res) => {
-  const { startDate, endDate } = req.query;
-  let query = supabase.from('orders').select('items');
-  if (startDate && endDate) {
-    query = query.gte('created_at', startDate).lte('created_at', endDate);
-  }
-  const { data, error } = await query;
-  if (error) {
-    console.error('Total items sold fetch error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-  const totalItemsSold = data.reduce((sum, order) => {
-    return sum + order.items.reduce((s, item) => s + (item.quantity || 1), 0);
-  }, 0);
-  res.json({ totalItemsSold });
-});
-
-app.get('/api/admin/analytics/average-order-value', async (req, res) => {
-  const { startDate, endDate } = req.query;
-  let query = supabase.from('orders').select('items');
-  if (startDate && endDate) {
-    query = query.gte('created_at', startDate).lte('created_at', endDate);
-  }
-  const { data, error } = await query;
-  if (error) {
-    console.error('Average order value fetch error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-  if (data.length === 0) {
-    return res.json({ averageOrderValue: 0 });
-  }
-  const totalRevenue = data.reduce((sum, order) => {
-    return sum + order.items.reduce((s, item) => s + (item.price * (item.quantity || 1)), 0);
-  }, 0);
-  const averageOrderValue = totalRevenue / data.length;
-  res.json({ averageOrderValue });
 });
 
 // Start server
