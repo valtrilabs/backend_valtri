@@ -108,25 +108,52 @@ app.patch('/api/orders/:id', async (req, res) => {
     return res.status(400).json({ error: 'Can only update pending orders' });
   }
 
-  // Validate items
+  // Fetch menu items to validate and normalize
+  const itemIds = items.map(item => item.item_id);
   const { data: menuItems, error: itemsError } = await supabase
     .from('menu_items')
-    .select('id')
-    .in('id', items.map(item => item.item_id));
-  if (itemsError || menuItems.length !== items.length) {
-    console.log('PATCH /api/orders/:id - Invalid items:', itemsError?.message);
+    .select('id, name, price, category, image_url')
+    .in('id', itemIds);
+  if (itemsError) {
+    console.log('PATCH /api/orders/:id - Menu items fetch error:', itemsError.message);
+    return res.status(500).json({ error: 'Failed to validate items' });
+  }
+  if (menuItems.length !== items.length) {
+    console.log('PATCH /api/orders/:id - Invalid items: Some item IDs not found');
+    return res.status(400).json({ error: 'Invalid items' });
+  }
+
+  // Normalize items
+  const normalizedItems = items.map(item => {
+    const menuItem = menuItems.find(mi => mi.id === item.item_id);
+    if (!menuItem) {
+      return null;
+    }
+    return {
+      item_id: item.item_id,
+      name: menuItem.name,
+      price: menuItem.price,
+      category: menuItem.category || '',
+      image_url: menuItem.image_url || '',
+      quantity: item.quantity || 1,
+      note: item.note || '',
+    };
+  }).filter(item => item !== null);
+
+  if (normalizedItems.length !== items.length) {
+    console.log('PATCH /api/orders/:id - Invalid items: Normalization failed');
     return res.status(400).json({ error: 'Invalid items' });
   }
 
   const { data, error } = await supabase
     .from('orders')
-    .update({ items, notes: notes || null })
+    .update({ items: normalizedItems, notes: notes || null })
     .eq('id', id)
-    .select('id, order_number, created_at, table_id, items, status, notes Ques, payment_type')
+    .select('id, order_number, created_at, table_id, items, status, notes, payment_type')
     .single();
   if (error) {
     console.error('PATCH /api/orders/:id - Order update error:', error);
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: `Failed to update order: ${error.message}` });
   }
   console.log('PATCH /api/orders/:id - Order updated:', data);
   res.json(data);
