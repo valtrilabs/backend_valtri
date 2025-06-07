@@ -6,17 +6,14 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 // CORS configuration
-const corsOptions = {
+app.use(cors({
   origin: ['https://frontend-kappa-blush-17.vercel.app', 'http://localhost:3000'],
   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-  optionsSuccessStatus: 200
-};
+  credentials: true
+}));
 
 // Middleware
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
 app.use(express.json());
 
 // Supabase client
@@ -122,7 +119,7 @@ app.patch('/api/orders/:id', async (req, res) => {
     .from('orders')
     .update({ items, notes: notes || null })
     .eq('id', id)
-    .select('id, order_number, created_at, table_id, items, status, notes Ques, payment_type')
+    .select('id, order_number, created_at, table_id, items, status, notes, payment_type')
     .single();
   if (error) {
     console.error('PATCH /api/orders/:id - Order update error:', error);
