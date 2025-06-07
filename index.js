@@ -16,7 +16,7 @@ const corsOptions = {
 
 // Middleware
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.options('*', cors(corsOptions)); // Handle preflight requests
 app.use(express.json());
 
 // Supabase client
@@ -30,7 +30,7 @@ const supabase = createClient(
 app.get('/api/menu', async (req, res) => {
   const { data, error } = await supabase
     .from('menu_items')
-    .select('id, name, category, price, description, image_url')
+    .select('id, name, category, price, description, image_url') // Added image_url
     .eq('is_available', true)
     .order('category, name');
   if (error) {
@@ -122,7 +122,7 @@ app.patch('/api/orders/:id', async (req, res) => {
     .from('orders')
     .update({ items, notes: notes || null })
     .eq('id', id)
-    .select('id, order_number, created_at, table_id, items, status, notes Ques, payment_type')
+    .select('id, order_number, created_at, table_id, items, status, notes, payment_type')
     .single();
   if (error) {
     console.error('PATCH /api/orders/:id - Order update error:', error);
@@ -296,235 +296,6 @@ app.get('/api/admin/orders/export', async (req, res) => {
   res.header('Content-Type', 'text/csv');
   res.attachment('orders.csv');
   res.send(csv);
-});
-
-// New analytics endpoints
-app.get('/api/admin/analytics/total-orders', async (req, res) => {
-  const { startDate, endDate } = req.query;
-  console.log('GET /api/admin/analytics/total-orders - Query:', { startDate, endDate });
-
-  let query = supabase
-    .from('orders')
-    .select('id', { count: 'exact' })
-    .eq('status', 'paid');
-
-  if (startDate && endDate) {
-    query = query
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
-  } else {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setUTCHours(23, 59, 59, 999);
-    query = query
-      .gte('created_at', todayStart.toISOString())
-      .lte('created_at', todayEnd.toISOString());
-  }
-
-  const { count, error } = await query;
-  if (error) {
-    console.error('GET /api/admin/analytics/total-orders - Error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-  res.json({ totalOrders: count || 0 });
-});
-
-app.get('/api/admin/analytics/total-revenue', async (req, res) => {
-  const { startDate, endDate } = req.query;
-  console.log('GET /api/admin/analytics/total-revenue - Query:', { startDate, endDate });
-
-  let query = supabase
-    .from('orders')
-    .select('items')
-    .eq('status', 'paid');
-
-  if (startDate && endDate) {
-    query = query
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
-  } else {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setUTCHours(23, 59, 59, 999);
-    query = query
-      .gte('created_at', todayStart.toISOString())
-      .lte('created_at', todayEnd.toISOString());
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('GET /api/admin/analytics/total-revenue - Error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-
-  const totalRevenue = data.reduce((sum, order) =>
-    sum + order.items.reduce((s, item) => s + (item.price * (item.quantity || 1)), 0), 0
-  );
-  res.json({ totalRevenue: totalRevenue || 0 });
-});
-
-app.get('/api/admin/analytics/most-sold-item', async (req, res) => {
-  const { startDate, endDate } = req.query;
-  console.log('GET /api/admin/analytics/most-sold-item - Query:', { startDate, endDate });
-
-  let query = supabase
-    .from('orders')
-    .select('items')
-    .eq('status', 'paid');
-
-  if (startDate && endDate) {
-    query = query
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
-  } else {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setUTCHours(23, 59, 59, 999);
-    query = query
-      .gte('created_at', todayStart.toISOString())
-      .lte('created_at', todayEnd.toISOString());
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('GET /api/admin/analytics/most-sold-item - Error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-
-  const itemCounts = {};
-  data.forEach(order => {
-    order.items.forEach(item => {
-      itemCounts[item.name] = (itemCounts[item.name] || 0) + (item.quantity || 1);
-    });
-  });
-
-  const mostSold = Object.entries(itemCounts).reduce((max, [name, totalSold]) =>
-    totalSold > (max.totalSold || 0) ? { name, totalSold } : max,
-    { name: '', totalSold: 0 }
-  );
-
-  res.json(mostSold);
-});
-
-app.get('/api/admin/analytics/peak-hours', async (req, res) => {
-  const { startDate, endDate } = req.query;
-  console.log('GET /api/admin/analytics/peak-hours - Query:', { startDate, endDate });
-
-  let query = supabase
-    .from('orders')
-    .select('created_at')
-    .eq('status', 'paid');
-
-  if (startDate && endDate) {
-    query = query
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
-  } else {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setUTCHours(23, 59, 59, 999);
-    query = query
-      .gte('created_at', todayStart.toISOString())
-      .lte('created_at', todayEnd.toISOString());
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('GET /api/admin/analytics/peak-hours - Error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-
-  const ordersByHour = Array(24).fill(0);
-  data.forEach(order => {
-    const istDate = new Date(order.created_at);
-    istDate.setHours(istDate.getHours() + 5);
-    istDate.setMinutes(istDate.getMinutes() + 30);
-    const hour = istDate.getHours();
-    ordersByHour[hour]++;
-  });
-
-  const peakHourIndex = ordersByHour.indexOf(Math.max(...ordersByHour));
-  const peakHour = peakHourIndex === -1 ? 'N/A' : `${peakHourIndex}:00`;
-
-  res.json({ peakHour });
-});
-
-app.get('/api/admin/analytics/average-order-value', async (req, res) => {
-  const { startDate, endDate } = req.query;
-  console.log('GET /api/admin/analytics/average-order-value - Query:', { startDate, endDate });
-
-  let query = supabase
-    .from('orders')
-    .select('items')
-    .eq('status', 'paid');
-
-  if (startDate && endDate) {
-    query = query
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
-  } else {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setUTCHours(23, 59, 59, 999);
-    query = query
-      .gte('created_at', todayStart.toISOString())
-      .lte('created_at', todayEnd.toISOString());
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('GET /api/admin/analytics/average-order-value - Error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-
-  const totalRevenue = data.reduce((sum, order) =>
-    sum + order.items.reduce((s, item) => s + (item.price * (item.quantity || 1)), 0), 0
-  );
-  const totalOrders = data.length;
-  const aov = totalOrders > 0 ? totalRevenue / totalOrders : 0;
-
-  res.json({ aov });
-});
-
-app.get('/api/admin/analytics/total-items-sold', async (req, res) => {
-  const { startDate, endDate } = req.query;
-  console.log('GET /api/admin/analytics/total-items-sold - Query:', { startDate, endDate });
-
-  let query = supabase
-    .from('orders')
-    .select('items')
-    .eq('status', 'paid');
-
-  if (startDate && endDate) {
-    query = query
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
-  } else {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setUTCHours(23, 59, 59, 999);
-    query = query
-      .gte('created_at', todayStart.toISOString())
-      .lte('created_at', todayEnd.toISOString());
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('GET /api/admin/analytics/total-items-sold - Error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-
-  const totalItemsSold = data.reduce((sum, order) =>
-    sum + order.items.reduce((s, item) => s + (item.quantity || 1), 0), 0
-  );
-
-  res.json({ totalItemsSold });
 });
 
 // Start server
