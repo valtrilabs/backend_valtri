@@ -6,13 +6,12 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 // CORS configuration
-const corsOptions = {
-  origin: ['https://frontend-kappa-blush-17.vercel.app', 'http://localhost:3000'],
-  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-  optionsSuccessStatus: 200
-};
+const cors = require('cors');
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // Middleware
 app.use(cors(corsOptions));
