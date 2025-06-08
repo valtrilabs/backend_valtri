@@ -234,15 +234,25 @@ app.get('/api/admin/orders/history', async (req, res) => {
   // Handle aggregations
   if (aggregate) {
     if (aggregate === 'revenue') {
-      const totalRevenue = data.reduce((sum, order) =>
-        sum + order.items.reduce((s, item) => s + (item.price * (item.quantity || 1)), 0), 0
-      );
+      const totalRevenue = data.reduce((sum, order) => {
+        // Check if order.items is an array; if not, contribute 0 to sum
+        if (!Array.isArray(order.items)) {
+          console.warn(`Order ${order.id} has invalid items: ${order.items}`);
+          return sum;
+        }
+        return sum + order.items.reduce((s, item) => s + (item.price * (item.quantity || 1)), 0);
+      }, 0);
       return res.json({ totalRevenue });
     }
     if (aggregate === 'items_sold') {
-      const totalItemsSold = data.reduce((sum, order) =>
-        sum + order.items.reduce((s, item) => s + (item.quantity || 1), 0), 0
-      );
+      const totalItemsSold = data.reduce((sum, order) => {
+        // Check if order.items is an array
+        if (!Array.isArray(order.items)) {
+          console.warn(`Order ${order.id} has invalid items: ${order.items}`);
+          return sum;
+        }
+        return sum + order.items.reduce((s, item) => s + (item.quantity || 1), 0);
+      }, 0);
       return res.json({ totalItemsSold });
     }
   }
@@ -268,7 +278,7 @@ app.get('/api/orders', async (req, res) => {
     console.error('GET /api/orders - Pending orders fetch error:', error);
     return res.status(500).json({ error: error.message });
   }
-  console.log('GET /api/orders - Pending orders fetched:', data);
+  console.log('GET /api/orders - Orders fetched:', data);
   res.json(data);
 });
 
@@ -286,7 +296,7 @@ app.get('/api/admin/orders/export', async (req, res) => {
   const csv = [
     'Order Number,Table Number,Items,Status,Notes,Created At,Payment Method',
     ...data.map(order =>
-      `${order.order_number || order.id},${order.tables.number},${JSON.stringify(order.items)},${order.status},${order.notes || ''},${order.created_at},${order.payment_type || ''}`
+      `${order.order_number || order.id},${order.tables?.number || 'N/A'},${JSON.stringify(order.items || [])},"${order.status || 'N/A'}","${order.notes || ''}","${order.created_at || ''}","${order.payment_type || ''}"`
     ),
   ].join('\n');
 
@@ -333,7 +343,7 @@ app.get('/api/admin/analytics/total-revenue', async (req, res) => {
 
   let query = supabase
     .from('orders')
-    .select('items')
+    .select('id, items')
     .eq('status', 'paid');
 
   if (startDate && endDate) {
@@ -356,10 +366,16 @@ app.get('/api/admin/analytics/total-revenue', async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 
-  const totalRevenue = data.reduce((sum, order) =>
-    sum + order.items.reduce((s, item) => s + (item.price * (item.quantity || 1)), 0), 0
-  );
-  res.json({ totalRevenue: totalRevenue || 0 });
+  const totalRevenue = data.reduce((sum, order) => {
+    // Check if order.items is an array
+    if (!Array.isArray(order.items)) {
+      console.warn(`Order ${order.id} has invalid items: ${order.items}`);
+      return sum;
+    }
+    return sum + order.items.reduce((s, item) => s + (item.price * (item.quantity || 1)), 0);
+  }, 0);
+
+  res.json({ totalRevenue });
 });
 
 app.get('/api/admin/analytics/most-sold-item', async (req, res) => {
@@ -368,7 +384,7 @@ app.get('/api/admin/analytics/most-sold-item', async (req, res) => {
 
   let query = supabase
     .from('orders')
-    .select('items')
+    .select('id, items')
     .eq('status', 'paid');
 
   if (startDate && endDate) {
@@ -393,6 +409,11 @@ app.get('/api/admin/analytics/most-sold-item', async (req, res) => {
 
   const itemCounts = {};
   data.forEach(order => {
+    // Skip if order.items is not an array
+    if (!Array.isArray(order.items)) {
+      console.warn(`Order ${order.id} has invalid items: ${order.items}`);
+      return;
+    }
     order.items.forEach(item => {
       itemCounts[item.name] = (itemCounts[item.name] || 0) + (item.quantity || 1);
     });
@@ -412,7 +433,7 @@ app.get('/api/admin/analytics/peak-hours', async (req, res) => {
 
   let query = supabase
     .from('orders')
-    .select('created_at')
+    .select('id, created_at')
     .eq('status', 'paid');
 
   if (startDate && endDate) {
@@ -456,7 +477,7 @@ app.get('/api/admin/analytics/average-order-value', async (req, res) => {
 
   let query = supabase
     .from('orders')
-    .select('items')
+    .select('id, items')
     .eq('status', 'paid');
 
   if (startDate && endDate) {
@@ -479,9 +500,14 @@ app.get('/api/admin/analytics/average-order-value', async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 
-  const totalRevenue = data.reduce((sum, order) =>
-    sum + order.items.reduce((s, item) => s + (item.price * (item.quantity || 1)), 0), 0
-  );
+  const totalRevenue = data.reduce((sum, order) => {
+    // Check if order.items is an array
+    if (!Array.isArray(order.items)) {
+      console.warn(`Order ${order.id} has invalid items: ${order.items}`);
+      return sum;
+    }
+    return sum + order.items.reduce((s, item) => s + (item.price * (item.quantity || 1)), 0);
+  }, 0);
   const totalOrders = data.length;
   const aov = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
@@ -494,7 +520,7 @@ app.get('/api/admin/analytics/total-items-sold', async (req, res) => {
 
   let query = supabase
     .from('orders')
-    .select('items')
+    .select('id, items')
     .eq('status', 'paid');
 
   if (startDate && endDate) {
@@ -517,14 +543,19 @@ app.get('/api/admin/analytics/total-items-sold', async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 
-  const totalItemsSold = data.reduce((sum, order) =>
-    sum + order.items.reduce((s, item) => s + (item.quantity || 1), 0), 0
-  );
+  const totalItemsSold = data.reduce((sum, order) => {
+    // Check if order.items is an array
+    if (!Array.isArray(order.items)) {
+      console.warn(`Order ${order.id} has invalid items: ${order.items}`);
+      return sum;
+    }
+    return sum + order.items.reduce((s, item) => s + (item.quantity || 1), 0);
+  }, 0);
 
   res.json({ totalItemsSold });
 });
 
 // Start server
 app.listen(port, () => {
-  console.log(`Backend running on port ${port}`);
+  console.log(`Server running on port ${port}`);
 });
