@@ -7,7 +7,7 @@ const port = process.env.PORT || 3001;
 
 // CORS configuration
 app.use(cors({
-  origin: ['https://frontend-kappa-blush-17.vercel.app', 'http://localhost:3000'],
+  origin: ['https://frontend-valtri.vercel.app', 'http://localhost:3000'],
   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
