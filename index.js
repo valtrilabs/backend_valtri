@@ -119,7 +119,7 @@ app.patch('/api/orders/:id', async (req, res) => {
     .from('orders')
     .update({ items, notes: notes || null })
     .eq('id', id)
-    .select('id, order_number, created_at, table_id, items, status, notes, payment_type, tables(number)')
+    .select('id, order_number, created_at, table_id, items, status, notes, payment_type')
     .single();
   if (error) {
     console.error('PATCH /api/orders/:id - Order update error:', error);
@@ -305,7 +305,7 @@ app.get('/api/admin/orders/export', async (req, res) => {
   res.send(csv);
 });
 
-// Analytics: Total Orders
+// New analytics endpoints
 app.get('/api/admin/analytics/total-orders', async (req, res) => {
   const { startDate, endDate } = req.query;
   console.log('GET /api/admin/analytics/total-orders - Query:', { startDate, endDate });
@@ -337,7 +337,6 @@ app.get('/api/admin/analytics/total-orders', async (req, res) => {
   res.json({ totalOrders: count || 0 });
 });
 
-// Analytics: Total Revenue
 app.get('/api/admin/analytics/total-revenue', async (req, res) => {
   const { startDate, endDate } = req.query;
   console.log('GET /api/admin/analytics/total-revenue - Query:', { startDate, endDate });
@@ -379,7 +378,6 @@ app.get('/api/admin/analytics/total-revenue', async (req, res) => {
   res.json({ totalRevenue });
 });
 
-// Analytics: Most Sold Item
 app.get('/api/admin/analytics/most-sold-item', async (req, res) => {
   const { startDate, endDate } = req.query;
   console.log('GET /api/admin/analytics/most-sold-item - Query:', { startDate, endDate });
@@ -429,7 +427,6 @@ app.get('/api/admin/analytics/most-sold-item', async (req, res) => {
   res.json(mostSold);
 });
 
-// Analytics: Peak Hours
 app.get('/api/admin/analytics/peak-hours', async (req, res) => {
   const { startDate, endDate } = req.query;
   console.log('GET /api/admin/analytics/peak-hours - Query:', { startDate, endDate });
@@ -474,7 +471,6 @@ app.get('/api/admin/analytics/peak-hours', async (req, res) => {
   res.json({ peakHour });
 });
 
-// Analytics: Average Order Value
 app.get('/api/admin/analytics/average-order-value', async (req, res) => {
   const { startDate, endDate } = req.query;
   console.log('GET /api/admin/analytics/average-order-value - Query:', { startDate, endDate });
@@ -518,7 +514,6 @@ app.get('/api/admin/analytics/average-order-value', async (req, res) => {
   res.json({ aov });
 });
 
-// Analytics: Total Items Sold
 app.get('/api/admin/analytics/total-items-sold', async (req, res) => {
   const { startDate, endDate } = req.query;
   console.log('GET /api/admin/analytics/total-items-sold - Query:', { startDate, endDate });
