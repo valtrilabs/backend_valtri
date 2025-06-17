@@ -2,7 +2,6 @@ require('dotenv').config();
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const cors = require('cors');
-const restrictToWifi = require('./middleware/restrictToWifi');
 const app = express();
 const port = process.env.PORT || 3001;
 
@@ -24,14 +23,8 @@ const supabase = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
-// New endpoint to check Wi-Fi status
-app.get('/api/check-wifi', restrictToWifi, (req, res) => {
-  console.log('GET /api/check-wifi - Client is on café Wi-Fi');
-  res.status(200).json({ isOnCafeWifi: true });
-});
-
-// Get menu items (restricted to Wi-Fi)
-app.get('/api/menu', restrictToWifi, async (req, res) => {
+// Get menu items
+app.get('/api/menu', async (req, res) => {
   const { data, error } = await supabase
     .from('menu_items')
     .select('id, name, category, price, description, image_url')
@@ -44,8 +37,8 @@ app.get('/api/menu', restrictToWifi, async (req, res) => {
   res.json(data);
 });
 
-// Create order (restricted to Wi-Fi)
-app.post('/api/orders', restrictToWifi, async (req, res) => {
+// Create order
+app.post('/api/orders', async (req, res) => {
   const { table_id, items, notes } = req.body;
   console.log('POST /api/orders - Payload:', { table_id, items, notes });
   if (!table_id || !items || !Array.isArray(items)) {
@@ -242,6 +235,7 @@ app.get('/api/admin/orders/history', async (req, res) => {
   if (aggregate) {
     if (aggregate === 'revenue') {
       const totalRevenue = data.reduce((sum, order) => {
+        // Check if order.items is an array; if not, contribute 0 to sum
         if (!Array.isArray(order.items)) {
           console.warn(`Order ${order.id} has invalid items: ${order.items}`);
           return sum;
@@ -252,6 +246,7 @@ app.get('/api/admin/orders/history', async (req, res) => {
     }
     if (aggregate === 'items_sold') {
       const totalItemsSold = data.reduce((sum, order) => {
+        // Check if order.items is an array
         if (!Array.isArray(order.items)) {
           console.warn(`Order ${order.id} has invalid items: ${order.items}`);
           return sum;
@@ -372,6 +367,7 @@ app.get('/api/admin/analytics/total-revenue', async (req, res) => {
   }
 
   const totalRevenue = data.reduce((sum, order) => {
+    // Check if order.items is an array
     if (!Array.isArray(order.items)) {
       console.warn(`Order ${order.id} has invalid items: ${order.items}`);
       return sum;
@@ -413,6 +409,7 @@ app.get('/api/admin/analytics/most-sold-item', async (req, res) => {
 
   const itemCounts = {};
   data.forEach(order => {
+    // Skip if order.items is not an array
     if (!Array.isArray(order.items)) {
       console.warn(`Order ${order.id} has invalid items: ${order.items}`);
       return;
@@ -504,6 +501,7 @@ app.get('/api/admin/analytics/average-order-value', async (req, res) => {
   }
 
   const totalRevenue = data.reduce((sum, order) => {
+    // Check if order.items is an array
     if (!Array.isArray(order.items)) {
       console.warn(`Order ${order.id} has invalid items: ${order.items}`);
       return sum;
@@ -546,6 +544,7 @@ app.get('/api/admin/analytics/total-items-sold', async (req, res) => {
   }
 
   const totalItemsSold = data.reduce((sum, order) => {
+    // Check if order.items is an array
     if (!Array.isArray(order.items)) {
       console.warn(`Order ${order.id} has invalid items: ${order.items}`);
       return sum;
