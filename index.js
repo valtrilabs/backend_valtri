@@ -241,69 +241,6 @@ app.get('/api/admin/orders', async (req, res) => {
 });
 
 // Get order history (admin)
-// app.get('/api/admin/orders/history', async (req, res) => {
-//   const { startDate, endDate, statuses, search, aggregate } = req.query;
-//   try {
-//     let query = supabase
-//       .from('orders')
-//       .select('id, order_number, created_at, table_id, items, status, notes, payment_type, tables(number)')
-//       .order('created_at', { ascending: false });
-
-//     // Date range filter
-//     if (startDate && endDate) {
-//       query = query.gte('created_at', startDate).lte('created_at', endDate);
-//     }
-
-//     // Status filter
-//     if (statuses) {
-//       const statusArray = statuses.split(',').map(s => s.trim());
-//       query = query.in('status', statusArray);
-//     }
-
-//     // Search by order_number or table number
-//     if (search) {
-//       const sanitizedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-//       query = query.or(`order_number.ilike.%${sanitizedSearch}%,tables.number.ilike.%${sanitizedSearch}%`);
-//     }
-
-//     // Handle aggregations
-//     if (aggregate) {
-//       const { data, error } = await query;
-//       if (error) throw error;
-
-//       if (aggregate === 'revenue') {
-//         const totalRevenue = data.reduce((sum, order) => {
-//           if (!Array.isArray(order.items)) {
-//             console.warn(`Order ${order.id} has invalid items: ${order.items}`);
-//             return sum;
-//           }
-//           return sum + order.items.reduce((s, item) => s + (item.price || 0) * (item.quantity || 1), 0);
-//         }, 0);
-//         return res.json({ totalRevenue });
-//       }
-//       if (aggregate === 'items_sold') {
-//         const totalItemsSold = data.reduce((sum, order) => {
-//           if (!Array.isArray(order.items)) {
-//             console.warn(`Order ${order.id} has invalid items: ${order.items}`);
-//             return sum;
-//           }
-//           return sum + order.items.reduce((s, item) => s + (item.quantity || 1), 0);
-//         }, 0);
-//         return res.json({ totalItemsSold });
-//       }
-//     }
-
-//     const { data, error } = await query;
-//     if (error) throw error;
-
-//     res.json(data || []);
-//   } catch (error) {
-//     console.error('GET /api/admin/orders/history - Error:', error);
-//     res.status(500).json({ error: `Failed to fetch order history: ${error.message}` });
-//   }
-// });
-
-// Get order history (admin)
 app.get('/api/admin/orders/history', async (req, res) => {
   const { startDate, endDate, statuses, search, aggregate } = req.query;
   try {
@@ -312,19 +249,9 @@ app.get('/api/admin/orders/history', async (req, res) => {
       .select('id, order_number, created_at, table_id, items, status, notes, payment_type, tables(number)')
       .order('created_at', { ascending: false });
 
-    // Date range filter (convert IST to UTC)
+    // Date range filter (treat as IST)
     if (startDate && endDate) {
-      // Assume startDate and endDate are in IST (e.g., 2025-06-17T00:00:00+05:30)
-      const startDateIST = new Date(startDate);
-      const endDateIST = new Date(endDate);
-
-      // Convert to UTC by subtracting 5 hours 30 minutes
-      const startDateUTC = new Date(startDateIST.getTime() - (5.5 * 60 * 60 * 1000));
-      const endDateUTC = new Date(endDateIST.getTime() - (5.5 * 60 * 60 * 1000));
-
-      query = query
-        .gte('created_at', startDateUTC.toISOString())
-        .lte('created_at', endDateUTC.toISOString());
+      query = query.gte('created_at', startDate).lte('created_at', endDate);
     }
 
     // Status filter
@@ -369,13 +296,7 @@ app.get('/api/admin/orders/history', async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
 
-    // Convert created_at to IST for frontend display
-    const dataWithIST = data.map(order => ({
-      ...order,
-      created_at: new Date(new Date(order.created_at).getTime() + (5.5 * 60 * 60 * 1000)).toISOString()
-    }));
-
-    res.json(dataWithIST || []);
+    res.json(data || []);
   } catch (error) {
     console.error('GET /api/admin/orders/history - Error:', error);
     res.status(500).json({ error: `Failed to fetch order history: ${error.message}` });
@@ -542,10 +463,7 @@ app.get('/api/admin/analytics/peak-hours', async (req, res) => {
     const ordersByHour = Array(24).fill(0);
     data.forEach(order => {
       if (!order.created_at) return;
-      const istDate = new Date(order.created_at);
-      istDate.setHours(istDate.getHours() + 5);
-      istDate.setMinutes(istDate.getMinutes() + 30);
-      const hour = istDate.getHours();
+      const hour = new Date(order.created_at).getHours();
       ordersByHour[hour]++;
     });
 
