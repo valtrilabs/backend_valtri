@@ -1,561 +1,414 @@
-require('dotenv').config();
 const express = require('express');
-const { createClient } = require('@supabase/supabase-js');
 const cors = require('cors');
+const { createClient } = require('@supabase/supabase-js');
+const { v4: uuidv4 } = require('uuid');
+
 const app = express();
-const port = process.env.PORT || 3001;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-// CORS configuration
-app.use(cors({
-  origin: ['https://frontend-valtri.vercel.app', 'http://localhost:3000'],
-  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
-
-// Middleware
+app.use(cors());
 app.use(express.json());
 
-// Supabase client
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY,
-  { auth: { autoRefreshToken: false, persistSession: false } }
-);
+// Middleware to log requests
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.url} - Body:`, req.body, 'Query:', req.query);
+  next();
+});
 
-// Get menu items
+// Fetch menu items
 app.get('/api/menu', async (req, res) => {
-  const { data, error } = await supabase
-    .from('menu_items')
-    .select('id, name, category, price, description, image_url')
-    .eq('is_available', true)
-    .order('category, name');
-  if (error) {
-    console.error('Menu fetch error:', error);
-    return res.status(500).json({ error: error.message });
+  try {
+    const { data, error } = await supabase
+      .from('menu_items')
+      .select('id, name, price, is_available, description, category, image_url')
+      .eq('is_available', true);
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    console.error('GET /api/menu - Error:', error);
+    res.status(500).json({ error: `Failed to fetch menu: ${error.message}` });
   }
-  res.json(data);
 });
 
-// Create order
+// Fetch tables
+app.get('/api/tables', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('tables').select('id, number');
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    console.error('GET /api/tables - Error:', error);
+    res.status(500).json({ error: `Failed to fetch tables: ${error.message}` });
+  }
+});
+
+// Create a new order
 app.post('/api/orders', async (req, res) => {
-  const { table_id, items, notes } = req.body;
-  console.log('POST /api/orders - Payload:', { table_id, items, notes });
-  if (!table_id || !items || !Array.isArray(items)) {
-    console.log('POST /api/orders - Invalid input');
-    return res.status(400).json({ error: 'Invalid input' });
+  const { table_id, items } = req.body;
+  if (!table_id || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Table ID and non-empty items array are required' });
   }
 
-  // Validate table_id
-  const { data: table, error: tableError } = await supabase
-    .from('tables')
-    .select('id')
-    .eq('id', table_id)
-    .single();
-  if (tableError || !table) {
-    console.log('POST /api/orders - Invalid table:', tableError?.message);
-    return res.status(400).json({ error: 'Invalid table' });
-  }
+  try {
+    const order_number = `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
+    const { data: table, error: tableError } = await supabase
+      .from('tables')
+      .select('id')
+      .eq('id', table_id)
+      .single();
+    if (tableError || !table) {
+      return res.status(400).json({ error: 'Invalid table ID' });
+    }
 
-  // Validate items
-  const { data: menuItems, error: itemsError } = await supabase
-    .from('menu_items')
-    .select('id')
-    .in('id', items.map(item => item.item_id));
-  if (itemsError || menuItems.length !== items.length) {
-    console.log('POST /api/orders - Invalid items:', itemsError?.message);
-    return res.status(400).json({ error: 'Invalid items' });
-  }
+    const validItems = items.map((item) => ({
+      item_id: item.item_id,
+      name: item.name || 'Unknown',
+      price: parseFloat(item.price) || 0,
+      quantity: parseInt(item.quantity) || 1,
+      category: item.category || '',
+      note: item.note || '',
+    }));
 
-  const { data, error } = await supabase
-    .from('orders')
-    .insert([{ table_id, items, status: 'pending', notes: notes || null }])
-    .select('id, order_number, created_at, table_id, items, status, notes, payment_type')
-    .single();
-  if (error) {
-    console.error('POST /api/orders - Order insert error:', error);
-    return res.status(500).json({ error: error.message });
+    const { data, error } = await supabase
+      .from('orders')
+      .insert([{ id: uuidv4(), table_id, items: validItems, status: 'pending', order_number }])
+      .select()
+      .single();
+    if (error) throw error;
+
+    const { data: orderWithTable, error: fetchError } = await supabase
+      .from('orders')
+      .select('*, tables(number)')
+      .eq('id', data.id)
+      .single();
+    if (fetchError) throw fetchError;
+
+    res.json(orderWithTable);
+  } catch (error) {
+    console.error('POST /api/orders - Error:', error);
+    res.status(500).json({ error: `Failed to create order: ${error.message}` });
   }
-  console.log('POST /api/orders - Order created:', data);
-  res.json(data);
 });
 
-// Update order items
-app.patch('/api/orders/:id', async (req, res) => {
-  const { id } = req.params;
-  const { items, notes } = req.body;
-  console.log('PATCH /api/orders/:id - Payload:', { id, items, notes });
-  if (!items || !Array.isArray(items)) {
-    console.log('PATCH /api/orders/:id - Invalid input');
-    return res.status(400).json({ error: 'Invalid input' });
-  }
-
-  // Check if order exists and is pending
-  const { data: order, error: orderError } = await supabase
-    .from('orders')
-    .select('status')
-    .eq('id', id)
-    .single();
-  if (orderError || !order) {
-    console.log('PATCH /api/orders/:id - Order not found:', orderError?.message);
-    return res.status(404).json({ error: 'Order not found' });
-  }
-  if (order.status !== 'pending') {
-    console.log('PATCH /api/orders/:id - Can only update pending orders');
-    return res.status(400).json({ error: 'Can only update pending orders' });
-  }
-
-  // Validate items
-  const { data: menuItems, error: itemsError } = await supabase
-    .from('menu_items')
-    .select('id')
-    .in('id', items.map(item => item.item_id));
-  if (itemsError || menuItems.length !== items.length) {
-    console.log('PATCH /api/orders/:id - Invalid items:', itemsError?.message);
-    return res.status(400).json({ error: 'Invalid items' });
-  }
-
-  const { data, error } = await supabase
-    .from('orders')
-    .update({ items, notes: notes || null })
-    .eq('id', id)
-    .select('id, order_number, created_at, table_id, items, status, notes, payment_type')
-    .single();
-  if (error) {
-    console.error('PATCH /api/orders/:id - Order update error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-  console.log('PATCH /api/orders/:id - Order updated:', data);
-  res.json(data);
-});
-
-// Get order by ID
+// Fetch a single order by ID
 app.get('/api/orders/:id', async (req, res) => {
-  const { id } = req.params;
-  const { data, error } = await supabase
-    .from('orders')
-    .select('id, order_number, created_at, table_id, items, status, notes, payment_type, tables(number)')
-    .eq('id', id)
-    .single();
-  if (error) {
-    console.error('GET /api/orders/:id - Order fetch error:', error);
-    return res.status(500).json({ error: error.message });
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*, tables(number)')
+      .eq('id', req.params.id)
+      .single();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'Order not found' });
+    res.json(data);
+  } catch (error) {
+    console.error('GET /api/orders/:id - Error:', error);
+    res.status(500).json({ error: `Failed to fetch order: ${error.message}` });
   }
-  if (!data) {
-    console.log('GET /api/orders/:id - Order not found');
-    return res.status(404).json({ error: 'Order not found' });
-  }
-  res.json(data);
 });
 
-// Mark order as paid
-app.patch('/api/orders/:id/pay', async (req, res) => {
-  const { id } = req.params;
-  const { payment_type } = req.body;
-  console.log('PATCH /api/orders/:id/pay - Payload:', { id, payment_type });
-
-  if (!payment_type || !['UPI', 'Cash', 'Bank', 'Card'].includes(payment_type)) {
-    console.log('PATCH /api/orders/:id/pay - Invalid payment type');
-    return res.status(400).json({ error: 'Valid payment type is required (UPI, Cash, Bank, Card)' });
-  }
-
-  const { data: order, error: orderError } = await supabase
-    .from('orders')
-    .select('id')
-    .eq('id', id)
-    .single();
-  if (orderError || !order) {
-    console.error('PATCH /api/orders/:id/pay - Order not found:', orderError?.message);
-    return res.status(404).json({ error: 'Order not found' });
-  }
-
-  const { data, error } = await supabase
-    .from('orders')
-    .update({ status: 'paid', payment_type })
-    .eq('id', id)
-    .select('id, order_number, created_at, table_id, items, status, notes, payment_type')
-    .single();
-  if (error) {
-    console.error('PATCH /api/orders/:id/pay - Order pay error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-  console.log('PATCH /api/orders/:id/pay - Order marked as paid:', data);
-  res.json(data);
-});
-
-// Get pending orders (admin)
+// Fetch all pending orders for admin
 app.get('/api/admin/orders', async (req, res) => {
-  const { data, error } = await supabase
-    .from('orders')
-    .select('id, order_number, created_at, table_id, items, status, notes, payment_type, tables(number)')
-    .eq('status', 'pending');
-  if (error) {
-    console.error('GET /api/admin/orders - Pending orders fetch error:', error);
-    return res.status(500).json({ error: error.message });
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*, tables(number)')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    console.error('GET /api/admin/orders - Error:', error);
+    res.status(500).json({ error: `Failed to fetch orders: ${error.message}` });
   }
-  res.json(data);
 });
 
-// Get order history (admin)
+// Update an order’s items
+app.patch('/api/orders/:id', async (req, res) => {
+  const { items } = req.body;
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Items must be a non-empty array' });
+  }
+
+  try {
+    const { data: existingOrder, error: fetchError } = await supabase
+      .from('orders')
+      .select('id')
+      .eq('id', req.params.id)
+      .single();
+    if (fetchError || !existingOrder) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    const validItems = items.map((item) => ({
+      item_id: item.item_id,
+      name: item.name || 'Unknown',
+      price: parseFloat(item.price) || 0,
+      quantity: parseInt(item.quantity) || 1,
+      category: item.category || '',
+      note: item.note || '',
+    }));
+
+    const { data, error } = await supabase
+      .from('orders')
+      .update({ items: validItems })
+      .eq('id', req.params.id)
+      .select('*, tables(number)')
+      .single();
+    if (error) throw error;
+
+    res.json(data);
+  } catch (error) {
+    console.error('PATCH /api/orders/:id - Error:', error);
+    res.status(500).json({ error: `Failed to update order: ${error.message}` });
+  }
+});
+
+// Mark an order as paid
+app.patch('/api/orders/:id/pay', async (req, res) => {
+  const { payment_type } = req.body;
+  if (!payment_type) {
+    return res.status(400).json({ error: 'Payment type is required' });
+  }
+
+  try {
+    const { data: existingOrder, error: fetchError } = await supabase
+      .from('orders')
+      .select('id')
+      .eq('id', req.params.id)
+      .single();
+    if (fetchError || !existingOrder) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    const { data, error } = await supabase
+      .from('orders')
+      .update({ status: 'paid', payment_type })
+      .eq('id', req.params.id)
+      .select('*, tables(number)')
+      .single();
+    if (error) throw error;
+
+    res.json(data);
+  } catch (error) {
+    console.error('PATCH /api/orders/:id/pay - Error:', error);
+    res.status(500).json({ error: `Failed to mark order as paid: ${error.message}` });
+  }
+});
+
+// Fetch order history with filters
 app.get('/api/admin/orders/history', async (req, res) => {
-  const { startDate, endDate, statuses, search, aggregate } = req.query;
-  console.log('GET /api/admin/orders/history - Query:', { startDate, endDate, statuses, search, aggregate });
+  const { startDate, endDate, statuses, aggregate } = req.query;
+  try {
+    let query = supabase
+      .from('orders')
+      .select('*, tables(number)')
+      .order('created_at', { ascending: false });
 
-  let query = supabase
-    .from('orders')
-    .select('id, order_number, created_at, table_id, items, status, notes, payment_type, tables(number)')
-    .order('created_at', { ascending: false });
+    if (startDate && endDate) {
+      query = query.gte('created_at', startDate).lte('created_at', endDate);
+    }
 
-  // Date range filter
-  if (startDate && endDate) {
-    query = query
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
-  }
+    if (statuses) {
+      const statusArray = statuses.split(',').map((s) => s.trim());
+      query = query.in('status', statusArray);
+    }
 
-  // Status filter
-  if (statuses) {
-    const statusArray = statuses.split(',');
-    query = query.in('status', statusArray);
-  }
-
-  // Search by order_number or table number
-  if (search) {
-    const sanitizedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    query = query.or(`order_number.ilike.%${sanitizedSearch}%,tables.number.ilike.%${sanitizedSearch}%`);
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('GET /api/admin/orders/history - History fetch error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-
-  // Handle aggregations
-  if (aggregate) {
     if (aggregate === 'revenue') {
-      const totalRevenue = data.reduce((sum, order) => {
-        // Check if order.items is an array; if not, contribute 0 to sum
-        if (!Array.isArray(order.items)) {
-          console.warn(`Order ${order.id} has invalid items: ${order.items}`);
-          return sum;
-        }
-        return sum + order.items.reduce((s, item) => s + (item.price * (item.quantity || 1)), 0);
-      }, 0);
+      query = query.select('items, status');
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const totalRevenue = data
+        .filter((order) => order.status === 'paid')
+        .reduce((sum, order) => {
+          if (!Array.isArray(order.items)) return sum;
+          return sum + order.items.reduce((itemSum, item) => itemSum + (item.price || 0) * (item.quantity || 1), 0);
+        }, 0);
+
       return res.json({ totalRevenue });
     }
-    if (aggregate === 'items_sold') {
-      const totalItemsSold = data.reduce((sum, order) => {
-        // Check if order.items is an array
-        if (!Array.isArray(order.items)) {
-          console.warn(`Order ${order.id} has invalid items: ${order.items}`);
-          return sum;
-        }
-        return sum + order.items.reduce((s, item) => s + (item.quantity || 1), 0);
-      }, 0);
-      return res.json({ totalItemsSold });
-    }
-  }
 
-  res.json(data);
+    const { data, error } = await query;
+    if (error) throw error;
+
+    res.json(data || []);
+  } catch (error) {
+    console.error('GET /api/admin/orders/history - Error:', error);
+    res.status(500).json({ error: `Failed to fetch order history: ${error.message}` });
+  }
 });
 
-// Get pending orders (waiter)
-app.get('/api/orders', async (req, res) => {
-  const { status } = req.query;
-  console.log('GET /api/orders - Query:', { status });
-  if (status !== 'pending') {
-    console.log('GET /api/orders - Invalid status');
-    return res.status(400).json({ error: 'Only pending status is supported' });
-  }
-
-  const { data, error } = await supabase
-    .from('orders')
-    .select('id, order_number, created_at, table_id, items, status, notes, payment_type, tables(number)')
-    .eq('status', 'pending')
-    .order('created_at', { ascending: false });
-  if (error) {
-    console.error('GET /api/orders - Pending orders fetch error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-  console.log('GET /api/orders - Orders fetched:', data);
-  res.json(data);
-});
-
-// Export orders as CSV (admin)
-app.get('/api/admin/orders/export', async (req, res) => {
-  const { data, error } = await supabase
-    .from('orders')
-    .select('id, order_number, created_at, table_id, items, status, notes, payment_type, tables(number)')
-    .order('created_at', { ascending: false });
-  if (error) {
-    console.error('GET /api/admin/orders/export - Orders export error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-
-  const csv = [
-    'Order Number,Table Number,Items,Status,Notes,Created At,Payment Method',
-    ...data.map(order =>
-      `${order.order_number || order.id},${order.tables?.number || 'N/A'},${JSON.stringify(order.items || [])},"${order.status || 'N/A'}","${order.notes || ''}","${order.created_at || ''}","${order.payment_type || ''}"`
-    ),
-  ].join('\n');
-
-  res.header('Content-Type', 'text/csv');
-  res.attachment('orders.csv');
-  res.send(csv);
-});
-
-// New analytics endpoints
+// Analytics: Total Orders
 app.get('/api/admin/analytics/total-orders', async (req, res) => {
   const { startDate, endDate } = req.query;
-  console.log('GET /api/admin/analytics/total-orders - Query:', { startDate, endDate });
+  try {
+    let query = supabase.from('orders').select('id', { count: 'exact' }).eq('status', 'paid');
 
-  let query = supabase
-    .from('orders')
-    .select('id', { count: 'exact' })
-    .eq('status', 'paid');
+    if (startDate && endDate) {
+      query = query.gte('created_at', startDate).lte('created_at', endDate);
+    }
 
-  if (startDate && endDate) {
-    query = query
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
-  } else {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setUTCHours(23, 59, 59, 999);
-    query = query
-      .gte('created_at', todayStart.toISOString())
-      .lte('created_at', todayEnd.toISOString());
-  }
+    const { count, error } = await query;
+    if (error) throw error;
 
-  const { count, error } = await query;
-  if (error) {
+    res.json({ totalOrders: count || 0 });
+  } catch (error) {
     console.error('GET /api/admin/analytics/total-orders - Error:', error);
-    return res.status(500).json({ error: error.message });
+    res.status(500).json({ error: `Failed to fetch total orders: ${error.message}` });
   }
-  res.json({ totalOrders: count || 0 });
 });
 
+// Analytics: Total Revenue
 app.get('/api/admin/analytics/total-revenue', async (req, res) => {
   const { startDate, endDate } = req.query;
-  console.log('GET /api/admin/analytics/total-revenue - Query:', { startDate, endDate });
+  try {
+    let query = supabase.from('orders').select('items').eq('status', 'paid');
 
-  let query = supabase
-    .from('orders')
-    .select('id, items')
-    .eq('status', 'paid');
-
-  if (startDate && endDate) {
-    query = query
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
-  } else {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setUTCHours(23, 59, 59, 999);
-    query = query
-      .gte('created_at', todayStart.toISOString())
-      .lte('created_at', todayEnd.toISOString());
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('GET /api/admin/analytics/total-revenue - Error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-
-  const totalRevenue = data.reduce((sum, order) => {
-    // Check if order.items is an array
-    if (!Array.isArray(order.items)) {
-      console.warn(`Order ${order.id} has invalid items: ${order.items}`);
-      return sum;
+    if (startDate && endDate) {
+      query = query.gte('created_at', startDate).lte('created_at', endDate);
     }
-    return sum + order.items.reduce((s, item) => s + (item.price * (item.quantity || 1)), 0);
-  }, 0);
 
-  res.json({ totalRevenue });
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const totalRevenue = data.reduce((sum, order) => {
+      if (!Array.isArray(order.items)) return sum;
+      return sum + order.items.reduce((itemSum, item) => itemSum + (item.price || 0) * (item.quantity || 1), 0);
+    }, 0);
+
+    res.json({ totalRevenue: totalRevenue || 0 });
+  } catch (error) {
+    console.error('GET /api/admin/analytics/total-revenue - Error:', error);
+    res.status(500).json({ error: `Failed to fetch total revenue: ${error.message}` });
+  }
 });
 
+// Analytics: Most Sold Item
 app.get('/api/admin/analytics/most-sold-item', async (req, res) => {
   const { startDate, endDate } = req.query;
-  console.log('GET /api/admin/analytics/most-sold-item - Query:', { startDate, endDate });
+  try {
+    let query = supabase.from('orders').select('items').eq('status', 'paid');
 
-  let query = supabase
-    .from('orders')
-    .select('id, items')
-    .eq('status', 'paid');
-
-  if (startDate && endDate) {
-    query = query
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
-  } else {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setUTCHours(23, 59, 59, 999);
-    query = query
-      .gte('created_at', todayStart.toISOString())
-      .lte('created_at', todayEnd.toISOString());
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('GET /api/admin/analytics/most-sold-item - Error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-
-  const itemCounts = {};
-  data.forEach(order => {
-    // Skip if order.items is not an array
-    if (!Array.isArray(order.items)) {
-      console.warn(`Order ${order.id} has invalid items: ${order.items}`);
-      return;
+    if (startDate && endDate) {
+      query = query.gte('created_at', startDate).lte('created_at', endDate);
     }
-    order.items.forEach(item => {
-      itemCounts[item.name] = (itemCounts[item.name] || 0) + (item.quantity || 1);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const itemQuantities = {};
+    data.forEach((order) => {
+      if (!Array.isArray(order.items)) return;
+      order.items.forEach((item) => {
+        const name = item.name || 'Unknown';
+        const quantity = parseInt(item.quantity) || 1;
+        itemQuantities[name] = (itemQuantities[name] || 0) + quantity;
+      });
     });
-  });
 
-  const mostSold = Object.entries(itemCounts).reduce((max, [name, totalSold]) =>
-    totalSold > (max.totalSold || 0) ? { name, totalSold } : max,
-    { name: '', totalSold: 0 }
-  );
+    const mostSold = Object.entries(itemQuantities).reduce(
+      (max, [name, totalSold]) => (totalSold > max.totalSold ? { name, totalSold } : max),
+      { name: 'N/A', totalSold: 0 }
+    );
 
-  res.json(mostSold);
+    res.json(mostSold);
+  } catch (error) {
+    console.error('GET /api/admin/analytics/most-sold-item - Error:', error);
+    res.status(500).json({ error: `Failed to fetch most sold item: ${error.message}` });
+  }
 });
 
+// Analytics: Peak Hours
 app.get('/api/admin/analytics/peak-hours', async (req, res) => {
   const { startDate, endDate } = req.query;
-  console.log('GET /api/admin/analytics/peak-hours - Query:', { startDate, endDate });
+  try {
+    let query = supabase.from('orders').select('created_at').eq('status', 'paid');
 
-  let query = supabase
-    .from('orders')
-    .select('id, created_at')
-    .eq('status', 'paid');
+    if (startDate && endDate) {
+      query = query.gte('created_at', startDate).lte('created_at', endDate);
+    }
 
-  if (startDate && endDate) {
-    query = query
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
-  } else {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setUTCHours(23, 59, 59, 999);
-    query = query
-      .gte('created_at', todayStart.toISOString())
-      .lte('created_at', todayEnd.toISOString());
-  }
+    const { data, error } = await query;
+    if (error) throw error;
 
-  const { data, error } = await query;
-  if (error) {
+    const hourCounts = Array(24).fill(0);
+    data.forEach((order) => {
+      if (!order.created_at) return;
+      const date = new Date(order.created_at);
+      date.setHours(date.getHours() + 5); // Convert UTC to IST
+      date.setMinutes(date.getMinutes() + 30);
+      const hour = date.getHours();
+      hourCounts[hour]++;
+    });
+
+    const peakHourIndex = hourCounts.reduce((maxIdx, count, idx, arr) => (count > arr[maxIdx] ? idx : maxIdx), 0);
+    const peakHour = hourCounts[peakHourIndex] > 0 ? `${peakHourIndex}:00-${peakHourIndex + 1}:00` : 'N/A';
+
+    res.json({ peakHour });
+  } catch (error) {
     console.error('GET /api/admin/analytics/peak-hours - Error:', error);
-    return res.status(500).json({ error: error.message });
+    res.status(500).json({ error: `Failed to fetch peak hours: ${error.message}` });
   }
-
-  const ordersByHour = Array(24).fill(0);
-  data.forEach(order => {
-    const istDate = new Date(order.created_at);
-    istDate.setHours(istDate.getHours() + 5);
-    istDate.setMinutes(istDate.getMinutes() + 30);
-    const hour = istDate.getHours();
-    ordersByHour[hour]++;
-  });
-
-  const peakHourIndex = ordersByHour.indexOf(Math.max(...ordersByHour));
-  const peakHour = peakHourIndex === -1 ? 'N/A' : `${peakHourIndex}:00`;
-
-  res.json({ peakHour });
 });
 
+// Analytics: Average Order Value
 app.get('/api/admin/analytics/average-order-value', async (req, res) => {
   const { startDate, endDate } = req.query;
-  console.log('GET /api/admin/analytics/average-order-value - Query:', { startDate, endDate });
+  try {
+    let query = supabase.from('orders').select('items').eq('status', 'paid');
 
-  let query = supabase
-    .from('orders')
-    .select('id, items')
-    .eq('status', 'paid');
-
-  if (startDate && endDate) {
-    query = query
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
-  } else {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setUTCHours(23, 59, 59, 999);
-    query = query
-      .gte('created_at', todayStart.toISOString())
-      .lte('created_at', todayEnd.toISOString());
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('GET /api/admin/analytics/average-order-value - Error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-
-  const totalRevenue = data.reduce((sum, order) => {
-    // Check if order.items is an array
-    if (!Array.isArray(order.items)) {
-      console.warn(`Order ${order.id} has invalid items: ${order.items}`);
-      return sum;
+    if (startDate && endDate) {
+      query = query.gte('created_at', startDate).lte('created_at', endDate);
     }
-    return sum + order.items.reduce((s, item) => s + (item.price * (item.quantity || 1)), 0);
-  }, 0);
-  const totalOrders = data.length;
-  const aov = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
-  res.json({ aov });
+    const { data, error } = await query;
+    if (error) throw error;
+
+    if (!data.length) return res.json({ aov: 0 });
+
+    const totalRevenue = data.reduce((sum, order) => {
+      if (!Array.isArray(order.items)) return sum;
+      return sum + order.items.reduce((itemSum, item) => itemSum + (item.price || 0) * (item.quantity || 1), 0);
+    }, 0);
+
+    const aov = totalRevenue / data.length;
+
+    res.json({ aov: aov || 0 });
+  } catch (error) {
+    console.error('GET /api/admin/analytics/average-order-value - Error:', error);
+    res.status(500).json({ error: `Failed to fetch average order value: ${error.message}` });
+  }
 });
 
+// Analytics: Total Items Sold
 app.get('/api/admin/analytics/total-items-sold', async (req, res) => {
   const { startDate, endDate } = req.query;
-  console.log('GET /api/admin/analytics/total-items-sold - Query:', { startDate, endDate });
+  try {
+    let query = supabase.from('orders').select('items').eq('status', 'paid');
 
-  let query = supabase
-    .from('orders')
-    .select('id, items')
-    .eq('status', 'paid');
-
-  if (startDate && endDate) {
-    query = query
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
-  } else {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setUTCHours(23, 59, 59, 999);
-    query = query
-      .gte('created_at', todayStart.toISOString())
-      .lte('created_at', todayEnd.toISOString());
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('GET /api/admin/analytics/total-items-sold - Error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-
-  const totalItemsSold = data.reduce((sum, order) => {
-    // Check if order.items is an array
-    if (!Array.isArray(order.items)) {
-      console.warn(`Order ${order.id} has invalid items: ${order.items}`);
-      return sum;
+    if (startDate && endDate) {
+      query = query.gte('created_at', startDate).lte('created_at', endDate);
     }
-    return sum + order.items.reduce((s, item) => s + (item.quantity || 1), 0);
-  }, 0);
 
-  res.json({ totalItemsSold });
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const totalItemsSold = data.reduce((sum, order) => {
+      if (!Array.isArray(order.items)) return sum;
+      return sum + order.items.reduce((itemSum, item) => itemSum + (parseInt(item.quantity) || 1), 0);
+    }, 0);
+
+    res.json({ totalItemsSold: totalItemsSold || 0 });
+  } catch (error) {
+    console.error('GET /api/admin/analytics/total-items-sold - Error:', error);
+    res.status(500).json({ error: `Failed to fetch total items sold: ${error.message}` });
+  }
 });
 
-// Start server
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
