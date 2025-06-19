@@ -8,14 +8,37 @@ const port = process.env.PORT || 3001;
 
 // CORS configuration
 app.use(cors({
-  origin: ['https://frontend-valtri.vercel.app', 'http://localhost:3000'],
-  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      'https://frontend-valtri.vercel.app',
+      'http://localhost:3000',
+      'http://localhost:3001'
+    ];
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.error(`CORS blocked for origin: ${origin}`);
+      callback(new Error(`CORS policy: Origin ${origin} not allowed`));
+    }
+  },
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  credentials: true,
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
 
 // Middleware
 app.use(express.json());
+
+// Prevent caching of API responses
+app.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.on('finish', () => {
+    console.log(`Response headers for ${req.method} ${req.url}:`, res.getHeaders());
+  });
+  next();
+});
 
 // Supabase client
 const supabase = createClient(
@@ -28,6 +51,23 @@ const supabase = createClient(
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.url} - Body:`, req.body, 'Query:', req.query);
   next();
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Test Supabase connectivity
+app.get('/api/test-supabase', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('menu_items').select('id').limit(1);
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('Supabase test error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get menu items
