@@ -22,7 +22,7 @@ app.use(cors({
     }
   },
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Waiter-Auth'],
   credentials: true,
   preflightContinue: false,
   optionsSuccessStatus: 204
@@ -49,7 +49,7 @@ const supabase = createClient(
 
 // Request logging middleware
 app.use((req, res, next) => {
-  console.log(`${req.method} ${req.url} - Body:`, req.body, 'Query:', req.query);
+  console.log(`${req.method} ${req.url} - Body:`, req.body, 'Query:', req.query, 'Headers:', req.headers);
   next();
 });
 
@@ -139,27 +139,36 @@ app.get('/api/menu', async (req, res) => {
 // Create order
 app.post('/api/orders', async (req, res) => {
   const { table_id, items, notes, latitude, longitude } = req.body;
-  if (!table_id || !items || !Array.isArray(items) || !latitude || !longitude) {
+  const isWaiterRequest = req.headers['x-waiter-auth'] === 'true';
+
+  if (!table_id || !items || !Array.isArray(items)) {
     console.log('POST /api/orders - Invalid input');
-    return res.status(400).json({ error: 'Table ID, items array, latitude, and longitude are required' });
+    return res.status(400).json({ error: 'Table ID and items array are required' });
   }
 
   try {
-    // Validate location
-    const { data: settings, error: settingsError } = await supabase
-      .from('cafe_settings')
-      .select('latitude, longitude, geofence_radius_meters')
-      .single();
+    // Validate location for non-waiter requests
+    if (!isWaiterRequest) {
+      if (!latitude || !longitude) {
+        console.log('POST /api/orders - Missing coordinates for non-waiter request');
+        return res.status(400).json({ error: 'Latitude and longitude are required for customer orders' });
+      }
 
-    if (settingsError || !settings) {
-      console.log('POST /api/orders - Cafe settings not found:', settingsError?.message);
-      return res.status(500).json({ error: 'Cafe settings not configured' });
-    }
+      const { data: settings, error: settingsError } = await supabase
+        .from('cafe_settings')
+        .select('latitude, longitude, geofence_radius_meters')
+        .single();
 
-    const distance = calculateDistance(latitude, longitude, settings.latitude, settings.longitude);
-    if (distance > settings.geofence_radius_meters) {
-      console.log('POST /api/orders - Location outside geofence');
-      return res.status(403).json({ error: 'Orders can only be placed from within the cafe' });
+      if (settingsError || !settings) {
+        console.log('POST /api/orders - Cafe settings not found:', settingsError?.message);
+        return res.status(500).json({ error: 'Cafe settings not configured' });
+      }
+
+      const distance = calculateDistance(latitude, longitude, settings.latitude, settings.longitude);
+      if (distance > settings.geofence_radius_meters) {
+        console.log('POST /api/orders - Location outside geofence');
+        return res.status(403).json({ error: 'Orders can only be placed from within the cafe' });
+      }
     }
 
     // Validate table_id
@@ -215,6 +224,8 @@ app.post('/api/orders', async (req, res) => {
 app.patch('/api/orders/:id', async (req, res) => {
   const { id } = req.params;
   const { items, notes } = req.body;
+  const isWaiterRequest = req.headers['x-waiter-auth'] === 'true';
+
   if (!items || !Array.isArray(items)) {
     console.log('PATCH /api/orders/:id - Invalid input');
     return res.status(400).json({ error: 'Non-empty items array is required' });
