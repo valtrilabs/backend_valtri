@@ -53,6 +53,56 @@ app.use((req, res, next) => {
   next();
 });
 
+// Validate location endpoint
+app.post('/api/validate-location', async (req, res) => {
+  const { latitude, longitude } = req.body;
+
+  if (!latitude || !longitude) {
+    console.log('POST /api/validate-location - Missing coordinates');
+    return res.status(400).json({ error: 'Latitude and longitude are required' });
+  }
+
+  try {
+    const { data: settings, error: settingsError } = await supabase
+      .from('cafe_settings')
+      .select('latitude, longitude, geofence_radius_meters')
+      .single();
+
+    if (settingsError || !settings) {
+      console.log('POST /api/validate-location - Cafe settings not found:', settingsError?.message);
+      return res.status(500).json({ error: 'Cafe settings not configured' });
+    }
+
+    // Calculate distance using Haversine formula (in meters)
+    const distance = calculateDistance(
+      latitude,
+      longitude,
+      settings.latitude,
+      settings.longitude
+    );
+
+    const isValid = distance <= settings.geofence_radius_meters;
+    res.json({ isValid });
+  } catch (error) {
+    console.error('POST /api/validate-location - Error:', error);
+    res.status(500).json({ error: `Failed to validate location: ${error.message}` });
+  }
+});
+
+// Haversine formula to calculate distance between two coordinates
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3; // Earth's radius in meters
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -88,13 +138,30 @@ app.get('/api/menu', async (req, res) => {
 
 // Create order
 app.post('/api/orders', async (req, res) => {
-  const { table_id, items, notes } = req.body;
-  if (!table_id || !items || !Array.isArray(items)) {
+  const { table_id, items, notes, latitude, longitude } = req.body;
+  if (!table_id || !items || !Array.isArray(items) || !latitude || !longitude) {
     console.log('POST /api/orders - Invalid input');
-    return res.status(400).json({ error: 'Table ID and non-empty items array are required' });
+    return res.status(400).json({ error: 'Table ID, items array, latitude, and longitude are required' });
   }
 
   try {
+    // Validate location
+    const { data: settings, error: settingsError } = await supabase
+      .from('cafe_settings')
+      .select('latitude, longitude, geofence_radius_meters')
+      .single();
+
+    if (settingsError || !settings) {
+      console.log('POST /api/orders - Cafe settings not found:', settingsError?.message);
+      return res.status(500).json({ error: 'Cafe settings not configured' });
+    }
+
+    const distance = calculateDistance(latitude, longitude, settings.latitude, settings.longitude);
+    if (distance > settings.geofence_radius_meters) {
+      console.log('POST /api/orders - Location outside geofence');
+      return res.status(403).json({ error: 'Orders can only be placed from within the cafe' });
+    }
+
     // Validate table_id
     const { data: table, error: tableError } = await supabase
       .from('tables')
